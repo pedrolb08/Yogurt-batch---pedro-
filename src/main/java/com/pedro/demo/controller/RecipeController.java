@@ -3,9 +3,9 @@ package com.pedro.demo.controller;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import com.pedro.demo.demain.repository.RecipeRepository;
 import com.pedro.demo.domain.model.Recipe;
 import com.pedro.demo.dto.RecipeDto;
+import com.pedro.demo.servicio.RecipeService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -22,7 +22,7 @@ import java.util.List;
 @Tag(name = "Gestión de Recetas", description = "Operaciones para crear, consultar, actualizar y eliminar recetas de yogur artesanal")
 public class RecipeController {
 
-    private final RecipeRepository recipeRepository;
+    private final RecipeService recipeService;
 
     @GetMapping
     @Operation(summary = "Obtener todas las recetas",
@@ -33,7 +33,7 @@ public class RecipeController {
         @ApiResponse(responseCode = "404", description = "No se encontraron recetas", content = @Content)
     })
     public ResponseEntity<List<Recipe>> getAllRecipes() {
-        return ResponseEntity.ok(recipeRepository.findAll());
+        return ResponseEntity.ok(recipeService.getAllActiveRecipes());
     }
 
     @GetMapping("/{id}")
@@ -47,9 +47,11 @@ public class RecipeController {
     public ResponseEntity<Recipe> getRecipeById(
             @Parameter(description = "ID único de la receta", required = true, example = "1")
             @PathVariable Long id) {
-        return recipeRepository.findById(id)
-                .map(ResponseEntity::ok)
-                .orElse(ResponseEntity.notFound().build());
+        try {
+            return ResponseEntity.ok(recipeService.getRecipe(id));
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @PostMapping
@@ -61,23 +63,8 @@ public class RecipeController {
         @ApiResponse(responseCode = "400", description = "Datos inválidos o campos obligatorios vacíos", content = @Content)
     })
     public ResponseEntity<Recipe> createRecipe(@RequestBody RecipeDto recipeDto) {
-        Recipe recipe = Recipe.builder()
-                .name(recipeDto.getName())
-                .description(recipeDto.getDescription())
-                .defaultMilkVolume(recipeDto.getDefaultMilkVolume())
-                .defaultStarterAmount(recipeDto.getDefaultStarterAmount())
-                .heatingTemperature(recipeDto.getHeatingTemperature())
-                .heatingDuration(recipeDto.getHeatingDuration())
-                .innoculationTemperature(recipeDto.getInnoculationTemperature())
-                .incubationTemperature(recipeDto.getIncubationTemperature())
-                .minIncubationTime(recipeDto.getMinIncubationTime())
-                .maxIncubationTime(recipeDto.getMaxIncubationTime())
-                .refrigerationTime(recipeDto.getRefrigerationTime())
-                .difficulty(recipeDto.getDifficulty())
-                .tips(recipeDto.getTips())
-                .active(true)
-                .build();
-        return ResponseEntity.status(HttpStatus.CREATED).body(recipeRepository.save(recipe));
+        Recipe savedRecipe = recipeService.createRecipe(recipeDto);
+        return ResponseEntity.status(HttpStatus.CREATED).body(savedRecipe);
     }
 
     @PutMapping("/{id}")
@@ -93,41 +80,30 @@ public class RecipeController {
             @Parameter(description = "ID único de la receta a actualizar", required = true, example = "1")
             @PathVariable Long id,
             @RequestBody RecipeDto recipeDto) {
-        return recipeRepository.findById(id)
-                .map(recipe -> {
-                    recipe.setName(recipeDto.getName());
-                    recipe.setDescription(recipeDto.getDescription());
-                    recipe.setDefaultMilkVolume(recipeDto.getDefaultMilkVolume());
-                    recipe.setDefaultStarterAmount(recipeDto.getDefaultStarterAmount());
-                    recipe.setHeatingTemperature(recipeDto.getHeatingTemperature());
-                    recipe.setHeatingDuration(recipeDto.getHeatingDuration());
-                    recipe.setInnoculationTemperature(recipeDto.getInnoculationTemperature());
-                    recipe.setIncubationTemperature(recipeDto.getIncubationTemperature());
-                    recipe.setMinIncubationTime(recipeDto.getMinIncubationTime());
-                    recipe.setMaxIncubationTime(recipeDto.getMaxIncubationTime());
-                    recipe.setRefrigerationTime(recipeDto.getRefrigerationTime());
-                    recipe.setDifficulty(recipeDto.getDifficulty());
-                    recipe.setTips(recipeDto.getTips());
-                    return ResponseEntity.ok(recipeRepository.save(recipe));
-                })
-                .orElse(ResponseEntity.notFound().build());
+        try {
+            Recipe updatedRecipe = recipeService.updateRecipe(id, recipeDto);
+            return ResponseEntity.ok(updatedRecipe);
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
+        }
     }
 
     @DeleteMapping("/{id}")
-    @Operation(summary = "Eliminar receta",
-        description = "Elimina permanentemente una receta del sistema usando su ID")
+    @Operation(summary = "Desactivar receta",
+        description = "Desactiva una receta del sistema usando su ID (soft delete)")
     @ApiResponses({
-        @ApiResponse(responseCode = "204", description = "Receta eliminada exitosamente", content = @Content),
+        @ApiResponse(responseCode = "204", description = "Receta desactivada exitosamente", content = @Content),
         @ApiResponse(responseCode = "404", description = "Receta no encontrada con el ID proporcionado", content = @Content)
     })
     public ResponseEntity<Void> deleteRecipe(
-            @Parameter(description = "ID único de la receta a eliminar", required = true, example = "1")
+            @Parameter(description = "ID único de la receta a desactivar", required = true, example = "1")
             @PathVariable Long id) {
-        if (recipeRepository.existsById(id)) {
-            recipeRepository.deleteById(id);
+        try {
+            recipeService.deactivateRecipe(id);
             return ResponseEntity.noContent().build();
+        } catch (RuntimeException e) {
+            return ResponseEntity.notFound().build();
         }
-        return ResponseEntity.notFound().build();
     }
 
     @GetMapping("/active")
@@ -139,20 +115,20 @@ public class RecipeController {
         @ApiResponse(responseCode = "404", description = "No se encontraron recetas activas", content = @Content)
     })
     public ResponseEntity<List<Recipe>> getActiveRecipes() {
-        return ResponseEntity.ok(recipeRepository.findByActive(true));
+        return ResponseEntity.ok(recipeService.getAllActiveRecipes());
     }
 
-    @GetMapping("/difficulty/{difficulty}")
-    @Operation(summary = "Obtener recetas por nivel de dificultad",
-        description = "Filtra las recetas según su nivel de dificultad: EASY, MEDIUM, DIFFICULT o EXPERT")
+    @GetMapping("/search")
+    @Operation(summary = "Buscar recetas por palabra clave",
+        description = "Busca recetas por nombre o descripción usando una palabra clave")
     @ApiResponses({
-        @ApiResponse(responseCode = "200", description = "Lista de recetas filtradas por dificultad",
+        @ApiResponse(responseCode = "200", description = "Lista de recetas encontradas",
             content = @Content(mediaType = "application/json", schema = @Schema(implementation = Recipe.class))),
-        @ApiResponse(responseCode = "400", description = "Nivel de dificultad inválido. Valores permitidos: EASY, MEDIUM, DIFFICULT, EXPERT", content = @Content)
+        @ApiResponse(responseCode = "400", description = "Palabra clave vacía", content = @Content)
     })
-    public ResponseEntity<List<Recipe>> getRecipesByDifficulty(
-            @Parameter(description = "Nivel de dificultad", required = true, example = "EASY")
-            @PathVariable Recipe.DifficultyLevel difficulty) {
-        return ResponseEntity.ok(recipeRepository.findByDifficulty(difficulty));
+    public ResponseEntity<List<Recipe>> searchRecipes(
+            @Parameter(description = "Palabra clave para buscar", required = true, example = "natural")
+            @RequestParam String keyword) {
+        return ResponseEntity.ok(recipeService.searchRecipes(keyword));
     }
 }
